@@ -1,4 +1,4 @@
-package ru.brickfinder.app
+package ru.brickfinder
 
 import android.app.Activity
 import android.content.Intent

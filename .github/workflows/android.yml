@@ -33,8 +33,16 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
-        run: gradle :app:assembleDebug --no-daemon
+     
+      - name: Diagnose Android project
+        run: |
+          echo "=== Project files ==="
+          find . -maxdepth 5 -type f | sort
+          echo "=== Gradle modules ==="
+          gradle projects --no-daemon
+          echo "=== App tasks ==="
+          gradle :app:tasks --all --no-daemon
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

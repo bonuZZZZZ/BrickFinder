@@ -34,14 +34,16 @@ jobs:
           gradle-version: '8.9'
 
      
-      - name: Diagnose Android project
+      
+      - name: Diagnose Gradle configuration
         run: |
-          echo "=== Project files ==="
-          find . -maxdepth 5 -type f | sort
-          echo "=== Gradle modules ==="
-          gradle projects --no-daemon
-          echo "=== App tasks ==="
-          gradle :app:tasks --all --no-daemon
+          echo "=== Build files ==="
+          ls -la app/
+          echo "=== Module properties ==="
+          gradle :app:properties --no-daemon | grep -E 'buildFile:|projectDir:'
+          echo "=== Gradle configuration ==="
+          gradle :app:tasks --all --info --no-daemon
+
 
 
       - name: Upload APK

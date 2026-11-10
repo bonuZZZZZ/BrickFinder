@@ -2,3 +2,4 @@ pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal()
 dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
 rootProject.name = "BrickFinder"
 include(":app")
+project(":app").buildFileName = "build.gradle.kts"

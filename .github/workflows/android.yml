@@ -34,15 +34,8 @@ jobs:
           gradle-version: '8.9'
 
      
-      
-      - name: Diagnose Gradle configuration
-        run: |
-          echo "=== Build files ==="
-          ls -la app/
-          echo "=== Module properties ==="
-          gradle :app:properties --no-daemon | grep -E 'buildFile:|projectDir:'
-          echo "=== Gradle configuration ==="
-          gradle :app:tasks --all --info --no-daemon
+      - name: Build APK
+        run: gradle :app:assembleDebug --no-daemon
 
 
 

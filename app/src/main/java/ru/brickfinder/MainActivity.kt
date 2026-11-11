@@ -63,7 +63,7 @@ class MainActivity : Activity() {
     data class Model(val brand: String, val sku: String, val title: String, val pieces: String) {
         fun query() = listOf(brand, sku, title).filter { it.isNotBlank() }.joinToString(" ").trim()
     }
-    data class Offer(val title: String, val shop: String, val link: String, val price: Double?, val image: String?)
+    data class Offer(val title: String, val shop: String, val link: String, val price: Double?, val image: String?, val kind: String)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -335,13 +335,13 @@ class MainActivity : Activity() {
             try {
                 val endpoint = URL("$requestedProvider/api/search?q=${enc(query)}&city=${enc(requestedCity)}&sources=${enc(selected.joinToString(","))}")
                 val connection = endpoint.openConnection() as HttpURLConnection
-                connection.connectTimeout = 12000; connection.readTimeout = 35000
+                connection.connectTimeout = 12000; connection.readTimeout = 65000
                 connection.setRequestProperty("x-brickfinder-token", accessToken)
                 try {
                     val code = connection.responseCode
                     if (code == 401) throw IllegalStateException("Неверный код доступа BrickFinder")
                     if (code == 503) throw IllegalStateException("Сервер ещё не настроен: проверь секреты Cloudflare")
-                    if (code == 502) throw IllegalStateException("Магазины не ответили вовремя. Повтори поиск позже")
+                    if (code == 502) throw IllegalStateException("Выбранные площадки не ответили. Попробуй включить Wildberries или повторить запрос позже")
                     if (code !in 200..299) throw IllegalStateException("HTTP $code")
                     val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                     val resolvedName = root.optString("catalog_name").takeIf { it.isNotBlank() && it != "null" }
@@ -357,7 +357,7 @@ class MainActivity : Activity() {
                         if (!validCard(link)) continue
                         val amount = if (item.isNull("price") || !item.has("price")) null else item.optDouble("price").takeIf { !it.isNaN() && it >= 0.0 }
                         parsed.add(Offer(item.optString("title", "Конструктор"), item.optString("shop", "Магазин"), link,
-                            amount, item.optString("image").takeIf { it.startsWith("https://") }))
+                            amount, item.optString("image").takeIf { it.startsWith("https://") }, item.optString("match_type", "set")))
                     }
                     runOnUiThread {
                         sortedOffers = parsed.distinctBy { it.link }
@@ -399,7 +399,12 @@ class MainActivity : Activity() {
         offersPanel.removeAllViews()
         val favs = saved()
         val filtered = sortedOffers.filter { !favoritesOnly || favs.contains(it.link) }
-            .sortedWith(if (ascending) Comparator<Offer> { a, b -> (a.price ?: Double.POSITIVE_INFINITY).compareTo(b.price ?: Double.POSITIVE_INFINITY) } else Comparator<Offer> { a, b -> (b.price ?: Double.NEGATIVE_INFINITY).compareTo(a.price ?: Double.NEGATIVE_INFINITY) })
+            .sortedWith(Comparator<Offer> { a, b ->
+                val kindOrder = (if (a.kind == "accessory") 1 else 0).compareTo(if (b.kind == "accessory") 1 else 0)
+                if (kindOrder != 0) kindOrder
+                else if (ascending) (a.price ?: Double.POSITIVE_INFINITY).compareTo(b.price ?: Double.POSITIVE_INFINITY)
+                else (b.price ?: Double.NEGATIVE_INFINITY).compareTo(a.price ?: Double.NEGATIVE_INFINITY)
+            })
         countText.text = if (favoritesOnly) "Избранное (${filtered.size})" else "Предложения (${filtered.size})"
         if (filtered.isEmpty()) {
             offersPanel.addView(text(if (favoritesOnly) "Пока нет избранных предложений из текущего поиска." else "Подходящих предложений пока нет.", 14f, muted))
@@ -420,7 +425,7 @@ class MainActivity : Activity() {
         val info = column().apply { setPadding(dp(12), dp(2), 0, 0) }
         val heading = text(offer.title, 14f, white, true).apply { maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END }
         info.addView(heading)
-        info.addView(text(offer.shop, 12f, yellow, true), margin(top = 7))
+        info.addView(text(offer.shop + if (offer.kind == "accessory") " · Деталь / аксессуар" else " · Набор", 12f, yellow, true), margin(top = 7))
         info.addView(text(offer.price?.let { "${money.format(it)} ₽" } ?: "Цена неизвестна", 21f, white, true), margin(top = 8))
         line.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         container.addView(line)

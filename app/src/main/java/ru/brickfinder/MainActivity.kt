@@ -7,6 +7,12 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.LinearGradient
+import android.graphics.Shader
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -31,11 +37,11 @@ import kotlin.concurrent.thread
 
 /** BrickFinder 0.9 dark UI with access code. Product offers are always supplied by the live Cloudflare API. */
 class MainActivity : Activity() {
-    private val bg = Color.rgb(10, 15, 25)
-    private val surface = Color.rgb(24, 32, 48)
-    private val surface2 = Color.rgb(32, 43, 62)
-    private val blue = Color.rgb(21, 92, 225)
-    private val yellow = Color.rgb(255, 211, 22)
+    private val bg = Color.rgb(3, 12, 30)
+    private val surface = Color.rgb(12, 25, 48)
+    private val surface2 = Color.rgb(24, 43, 72)
+    private val blue = Color.rgb(0, 93, 247)
+    private val yellow = Color.rgb(255, 214, 8)
     private val muted = Color.rgb(162, 174, 195)
     private val white = Color.WHITE
     private lateinit var queryInput: EditText
@@ -55,6 +61,11 @@ class MainActivity : Activity() {
     private var sortedOffers: List<Offer> = emptyList()
     private var ascending = true
     private var favoritesOnly = false
+    private var requestSerial = 0
+    private var sourceCount = 0
+    private var sortButton: TextView? = null
+    private var searchTabView: TextView? = null
+    private var favoritesTabView: TextView? = null
     private val photoRequest = 101
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private val prefs by lazy { getPreferences(MODE_PRIVATE) }
@@ -98,142 +109,199 @@ class MainActivity : Activity() {
         setPadding(dp(14), dp(15), dp(14), dp(15))
         isClickable = true
     }
+    // Gradient surfaces and dynamic source chips use native Android controls, not bitmap mockups.
+    private fun gradient(top: Int, bottom: Int, radius: Int, stroke: Int? = null): GradientDrawable =
+        GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom)).apply {
+            cornerRadius = dp(radius).toFloat()
+            if (stroke != null) setStroke(dp(1), stroke)
+        }
+
     private fun renderScreen() {
-        val root = column().apply { setBackgroundColor(bg) }
+        val root = column().apply { background = rounded(bg, 0) }
+        val backdrop = FrameLayout(this)
+        root.addView(backdrop, LinearLayout.LayoutParams(-1, 0, 1f))
+        val cosmic = ImageView(this).apply {
+            setImageResource(R.drawable.brickfinder_space)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            alpha = .88f
+        }
+        backdrop.addView(cosmic, FrameLayout.LayoutParams(-1, -1))
+        val scroller = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+            fillViewport = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        backdrop.addView(scroller, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
-        val scroller = ScrollView(this).apply { isFillViewport = false }
-        root.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
-        val content = column().apply { setPadding(dp(16), dp(14), dp(16), dp(22)) }
+        val content = column().apply { setPadding(dp(14), dp(9), dp(14), dp(28)) }
         scroller.addView(content)
 
-        // Header: user-supplied blue astronaut mascot and distinctive dark/yellow branding.
+        // Keep the existing blue mascot asset; the brand is now straight, bigger and sans italic.
         val hero = row().apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(5, 45, 111), Color.rgb(6, 20, 43))).apply { cornerRadius = dp(22).toFloat() }
-            setPadding(dp(18), dp(16), dp(4), dp(10))
+            background = gradient(Color.rgb(2, 31, 75), Color.rgb(2, 18, 43), 22, Color.rgb(22, 68, 115))
+            setPadding(dp(15), dp(12), dp(2), dp(10))
         }
         val heroCopy = column()
-        val brand = text("BrickFinder", 27f, white, true)
-        heroCopy.addView(brand)
-        heroCopy.addView(text("Найди свой конструктор\nпо лучшей цене", 13f, Color.rgb(217, 231, 255)), margin(top = 9))
-        heroCopy.addView(text("LEGO и совместимые аналоги", 11f, yellow, true), margin(top = 11))
+        val brick = text("▰", 28f, yellow, true)
+        val logoRow = row()
+        logoRow.addView(brick)
+        val logo = text("Brick", 27f, white, true)
+        logoRow.addView(logo)
+        logoRow.addView(text("Finder", 27f, yellow, true))
+        heroCopy.addView(logoRow)
+        // No extra line about comparing analogs, as requested.
+        // Header deliberately has no subtitle, per approved design.
         hero.addView(heroCopy, LinearLayout.LayoutParams(0, -2, 1f))
         val mascot = ImageView(this).apply { setImageResource(R.drawable.brickfinder_mascot); scaleType = ImageView.ScaleType.FIT_CENTER }
-        hero.addView(mascot, LinearLayout.LayoutParams(dp(128), dp(148)))
-        content.addView(hero, margin(bottom = 18))
+        hero.addView(mascot, LinearLayout.LayoutParams(dp(110), dp(108)))
+        content.addView(hero, margin(bottom = 14))
 
-        val searchBox = row().apply { background = rounded(surface2, 22, Color.rgb(54, 70, 97)); setPadding(dp(14), dp(4), dp(12), dp(4)) }
-        searchBox.addView(text("⌕", 29f, muted), LinearLayout.LayoutParams(dp(34), -2))
+        val searchBox = row().apply {
+            background = gradient(Color.rgb(32, 55, 84), Color.rgb(20, 36, 61), 21, Color.rgb(87, 122, 165))
+            setPadding(dp(13), dp(2), dp(10), dp(2))
+            elevation = dp(4).toFloat()
+        }
+        searchBox.addView(text("⌕", 27f, white), LinearLayout.LayoutParams(dp(30), -2))
         queryInput = EditText(this).apply {
-            hint = "Название или артикул, например 42143"
-            setHintTextColor(muted)
-            setTextColor(white)
-            textSize = 14f
-            isSingleLine = true
-            background = null
+            hint = "Название набора или артикул"
+            setHintTextColor(muted); setTextColor(white); textSize = 13f
+            isSingleLine = true; background = null
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { if (!updatingFromPhoto) photoModel = null }
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
-        searchBox.addView(queryInput, LinearLayout.LayoutParams(0, dp(50), 1f))
-        content.addView(searchBox, margin(bottom = 12))
-        val photoBtn = button("▣    Поиск по фото")
-        photoBtn.setOnClickListener { pickPhoto() }
-        content.addView(photoBtn, margin(bottom = 14))
+        searchBox.addView(queryInput, LinearLayout.LayoutParams(0, dp(49), 1f))
+        content.addView(searchBox, margin(bottom = 10))
+        val photoBtn = button("▣  Поиск по фото").apply {
+            textSize = 16f
+            background = gradient(Color.rgb(255, 236, 18), Color.rgb(255, 197, 0), 19)
+            elevation = dp(5).toFloat()
+            setOnClickListener { pickPhoto() }
+        }
+        content.addView(photoBtn, margin(bottom = 6))
         photoPreview = ImageView(this).apply { visibility = View.GONE; adjustViewBounds = true; maxHeight = dp(220); scaleType = ImageView.ScaleType.FIT_CENTER }
         content.addView(photoPreview)
         selectionText = text("", 12f, yellow)
         content.addView(selectionText)
 
-        val sourcesHeading = row()
-        sourcesHeading.addView(text("Где искать", 19f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
-        val how = text("ⓘ  Как сравниваем?", 11f, Color.rgb(80, 167, 255)).apply {
+        val heading = row()
+        heading.addView(text("Где искать", 20f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val info = text("ⓘ  Как сравниваем?", 11f, Color.rgb(75, 184, 255)).apply {
             setOnClickListener { showComparisonInfo() }
-            setPadding(dp(6), dp(9), 0, dp(9))
         }
-        sourcesHeading.addView(how)
-        content.addView(sourcesHeading, margin(top = 23, bottom = 10))
-        cityButton = text("⌖  Город доставки: $deliveryCity   ▾", 14f, yellow, true).apply {
-            background = rounded(surface2, 14)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+        heading.addView(info)
+        content.addView(heading, margin(top = 14, bottom = 8))
+        cityButton = text("⌖  Город доставки: $deliveryCity  ▾", 13f, white, true).apply {
+            background = gradient(Color.rgb(30, 54, 85), Color.rgb(16, 35, 65), 17, Color.rgb(77, 111, 156))
+            setPadding(dp(13), dp(11), dp(13), dp(11))
             setOnClickListener { chooseDeliveryCity() }
             contentDescription = "Выбрать город доставки"
         }
-        content.addView(cityButton, margin(bottom = 12))
+        content.addView(cityButton, margin(bottom = 9))
+        // Exactly the approved layout: three marketplaces in the first row, two in the second.
         val selectors = column()
-        val firstLine = row()
-        ozonToggle = sourceToggle("Ozon", true)
-        wbToggle = sourceToggle("Wildberries", true)
-        firstLine.addView(ozonToggle, LinearLayout.LayoutParams(0, dp(54), 1f))
-        firstLine.addView(wbToggle, LinearLayout.LayoutParams(0, dp(54), 1f).apply { leftMargin = dp(8) })
-        selectors.addView(firstLine)
-        val secondLine = row()
-        aliToggle = sourceToggle("AliExpress", true)
-        yandexToggle = sourceToggle("Яндекс Маркет", true)
-        secondLine.addView(aliToggle, LinearLayout.LayoutParams(0, dp(54), 1f))
-        secondLine.addView(yandexToggle, LinearLayout.LayoutParams(0, dp(54), 1f).apply { leftMargin = dp(8) })
-        selectors.addView(secondLine, margin(top = 8))
-        avitoToggle = sourceToggle("Авито · дополнительно", false)
-        selectors.addView(avitoToggle, margin(top = 8))
+        val r1 = row()
+        ozonToggle = sourceToggle("Ozon", "◉", Color.rgb(10, 108, 245), true)
+        wbToggle = sourceToggle("Wildberries", "WB", Color.rgb(171, 16, 194), true)
+        aliToggle = sourceToggle("AliExpress", "◡", Color.rgb(242, 67, 24), true)
+        r1.addView(ozonToggle, LinearLayout.LayoutParams(0, dp(49), 1f))
+        r1.addView(wbToggle, LinearLayout.LayoutParams(0, dp(49), 1.28f).apply { leftMargin = dp(5) })
+        r1.addView(aliToggle, LinearLayout.LayoutParams(0, dp(49), 1.15f).apply { leftMargin = dp(5) })
+        selectors.addView(r1)
+        val r2 = row()
+        yandexToggle = sourceToggle("Яндекс Маркет", "Я", Color.rgb(248, 200, 14), true)
+        avitoToggle = sourceToggle("Авито", "●", Color.rgb(19, 188, 169), false)
+        r2.addView(yandexToggle, LinearLayout.LayoutParams(0, dp(49), 1f))
+        r2.addView(avitoToggle, LinearLayout.LayoutParams(0, dp(49), 1f).apply { leftMargin = dp(7) })
+        selectors.addView(r2, margin(top = 7))
         content.addView(selectors)
-        content.addView(text("Поиск Ozon и AliExpress зависит от ответа внешних сервисов. Яндекс Маркет пока без подтверждённых цен. Доставка в $deliveryCity проверяется в магазине.", 11f, muted), margin(top = 9))
 
-        val go = button("Найти предложения", blue, white).apply { textSize = 17f }
-        go.setOnClickListener { search() }
-        content.addView(go, margin(top = 21, bottom = 12))
-        val externalHeading = text("Проверить товары напрямую", 13f, muted, true)
-        content.addView(externalHeading, margin(top = 8, bottom = 6))
-        val externalLinks = row()
-        val ozonLink = button("Ozon ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("ozon") } }
-        val marketLink = button("Яндекс Маркет ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("market") } }
-        externalLinks.addView(ozonLink, LinearLayout.LayoutParams(0, dp(45), 1f))
-        externalLinks.addView(marketLink, LinearLayout.LayoutParams(0, dp(45), 1f).apply { leftMargin = dp(8) })
-        content.addView(externalLinks, margin(bottom = 8))
-        statusText = text("Поиск использует твой Cloudflare Worker.", 12f, muted)
-        content.addView(statusText, margin(bottom = 14))
-
+        val go = button("Найти предложения", blue, white).apply {
+            textSize = 17f
+            background = gradient(Color.rgb(22, 123, 255), Color.rgb(0, 66, 210), 21, Color.rgb(29, 201, 255))
+            elevation = dp(6).toFloat()
+            setOnClickListener { search() }
+        }
+        content.addView(go, margin(top = 26, bottom = 16, left = 12, right = 12))
+        statusText = text("Выбери площадки и начни поиск.", 11f, muted)
+        content.addView(statusText, margin(bottom = 12, left = 3, right = 3))
         val resultsHeading = row()
-        countText = text("Найденные предложения", 19f, white, true)
+        countText = text("Найденные предложения", 18f, white, true)
         resultsHeading.addView(countText, LinearLayout.LayoutParams(0, -2, 1f))
-        val sort = text("⇅  По цене", 12f, yellow, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); background = rounded(surface2, 14); setOnClickListener { ascending = !ascending; refreshOffers() } }
+        val sort = text("⇅  Сначала выгодные ▾", 11f, white, true).apply {
+            setPadding(dp(8), dp(10), dp(8), dp(10))
+            background = gradient(Color.rgb(31, 50, 79), Color.rgb(14, 30, 54), 15, Color.rgb(83, 112, 151))
+            setOnClickListener {
+                ascending = !ascending
+                text = if (ascending) "⇅  Сначала выгодные ▾" else "⇅  Сначала дорогие ▾"
+                refreshOffers()
+            }
+        }
+        sortButton = sort
         resultsHeading.addView(sort)
-        content.addView(resultsHeading, margin(bottom = 12))
+        content.addView(resultsHeading, margin(bottom = 11))
         offersPanel = column()
         content.addView(offersPanel)
-        offersPanel.addView(text("Здесь появятся предложения из выбранных источников. Наличие и цены проверяй в магазине.", 13f, muted))
+        offersPanel.addView(text("Здесь появятся реальные предложения выбранных магазинов.", 12f, muted))
 
         val bottom = row().apply {
-            setPadding(dp(16), dp(9), dp(16), dp(12))
-            background = rounded(surface, 18)
+            setPadding(dp(9), dp(7), dp(9), dp(9))
+            background = gradient(Color.rgb(24, 42, 71), Color.rgb(6, 18, 35), 22, Color.rgb(52, 86, 121))
         }
-        val searchTab = text("⌂  Поиск", 15f, yellow, true).apply { gravity = Gravity.CENTER; background = rounded(Color.rgb(16, 54, 112), 15); setOnClickListener { favoritesOnly = false; refreshOffers() } }
-        bottom.addView(searchTab, LinearLayout.LayoutParams(0, dp(44), 1f))
-        val favTab = text("♡  Избранное", 15f, white).apply { gravity = Gravity.CENTER; setOnClickListener { favoritesOnly = true; refreshOffers() } }
-        bottom.addView(favTab, LinearLayout.LayoutParams(0, dp(44), 1f))
-        val settingsTab = text("⚙  Профиль", 14f, muted).apply { gravity = Gravity.CENTER; contentDescription = "Настройки сервера"; setOnClickListener { showSettings() } }
-        bottom.addView(settingsTab, LinearLayout.LayoutParams(0, dp(44), 1f))
+        val searchTab = text("⌂\nПоиск", 13f, white, true).apply {
+            gravity = Gravity.CENTER
+            background = gradient(Color.rgb(17, 91, 181), Color.rgb(3, 42, 98), 16, Color.rgb(31, 131, 237))
+            setOnClickListener { favoritesOnly = false; updateTabs(); refreshOffers() }
+        }
+        searchTabView = searchTab
+        bottom.addView(searchTab, LinearLayout.LayoutParams(0, dp(53), 1f))
+        val favTab = text("♡\nИзбранное", 12f, white).apply {
+            gravity = Gravity.CENTER
+            setOnClickListener { favoritesOnly = true; updateTabs(); refreshOffers() }
+        }
+        favoritesTabView = favTab
+        bottom.addView(favTab, LinearLayout.LayoutParams(0, dp(53), 1f))
+        val notificationTab = text("♧\nУведомления", 11f, white).apply {
+            gravity = Gravity.CENTER
+            setOnClickListener { Toast.makeText(this@MainActivity, "Уведомления пока не подключены", Toast.LENGTH_SHORT).show() }
+        }
+        bottom.addView(notificationTab, LinearLayout.LayoutParams(0, dp(53), 1f))
+        val settingsTab = text("♙\nПрофиль", 12f, white).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "Настройки сервера"
+            setOnClickListener { showSettings() }
+        }
+        bottom.addView(settingsTab, LinearLayout.LayoutParams(0, dp(53), 1f))
         root.addView(bottom)
     }
 
-    private fun sourceToggle(label: String, checked: Boolean): CheckBox = CheckBox(this).apply {
-        val mark = when {
-            label.startsWith("Ozon") -> "◉  "
-            label.startsWith("Wildberries") -> "WB  "
-            label.startsWith("AliExpress") -> "◈  "
-            label.startsWith("Яндекс") -> "Я  "
-            else -> "●  "
+    private fun updateTabs() {
+        searchTabView?.background = if (!favoritesOnly) gradient(Color.rgb(17, 91, 181), Color.rgb(3, 42, 98), 16) else rounded(Color.TRANSPARENT, 16)
+        favoritesTabView?.background = if (favoritesOnly) gradient(Color.rgb(17, 91, 181), Color.rgb(3, 42, 98), 16) else rounded(Color.TRANSPARENT, 16)
+    }
+
+    private fun sourceToggle(label: String, initial: String, color: Int, checkedByDefault: Boolean): CheckBox = CheckBox(this).apply {
+        setButtonDrawable(null as Drawable?)
+        text = "${if (checkedByDefault) "☑" else "□"} $initial $label"
+        textSize = when (label) {
+            "Wildberries", "Яндекс Маркет", "AliExpress" -> 10.5f
+            else -> 12f
         }
-        text = mark + label
-        textSize = if (label == "Яндекс Маркет") 12f else 13f
         setTextColor(white)
-        isChecked = checked
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER_VERTICAL
+        isChecked = prefs.getBoolean("source_$label", checkedByDefault)
+        text = "${if (isChecked) "☑" else "□"} $initial $label"
         buttonTintList = android.content.res.ColorStateList.valueOf(yellow)
-        background = rounded(surface2, 16, if (checked) blue else Color.rgb(54, 65, 86))
-        setPadding(dp(8), 0, dp(8), 0)
-        // Larger tile / clearer checked-state border like the reference.
+        background = gradient(if (isChecked) Color.rgb(17, 58, 119) else surface2, Color.rgb(9, 25, 48), 14, if (isChecked) Color.rgb(24, 140, 255) else Color.rgb(65, 87, 121))
+        setPadding(dp(3), 0, dp(2), 0)
         setOnCheckedChangeListener { tile, active ->
-            tile.background = rounded(surface2, 16, if (active) blue else Color.rgb(54, 65, 86))
+            tile.text = "${if (active) "☑" else "□"} $initial $label"
+            tile.background = gradient(if (active) Color.rgb(17, 58, 119) else surface2, Color.rgb(9, 25, 48), 14, if (active) Color.rgb(24, 140, 255) else Color.rgb(65, 87, 121))
+            prefs.edit().putBoolean("source_$label", active).apply()
         }
     }
     private fun showComparisonInfo() {
@@ -275,7 +343,7 @@ class MainActivity : Activity() {
             return
         }
         prefs.edit().putString("delivery_city", value).apply()
-        cityButton.text = "⌖  Город доставки: $value   ▾"
+        cityButton.text = "⌖  Город доставки: $value  ▾"
         statusText.text = "Город выбран: $value. Проверь возможность доставки в карточке магазина."
     }
 
@@ -361,7 +429,11 @@ class MainActivity : Activity() {
         if (selected.isEmpty()) { statusText.text = "Выбери хотя бы одну подключённую площадку."; return }
         if (!provider.startsWith("https://")) { statusText.text = "Укажи HTTPS-адрес сервера в настройках ⚙."; return }
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(queryInput.windowToken, 0)
-        statusText.text = "Ищу подходящие конструкторы…"
+        favoritesOnly = false
+        updateTabs()
+        sourceCount = selected.size
+        val serial = ++requestSerial
+        statusText.text = "Сравниваю цены на ${selected.size} площадках…"
         offersPanel.removeAllViews()
         offersPanel.addView(text("Загружаю предложения…", 14f, muted))
         countText.text = "Предложения"
@@ -403,19 +475,21 @@ class MainActivity : Activity() {
                         val item = arr.optJSONObject(i) ?: continue
                         val link = item.optString("url")
                         if (!validCard(link)) continue
-                        val amount = if (item.isNull("price") || !item.has("price")) null else item.optDouble("price").takeIf { !it.isNaN() && it >= 0.0 }
+                        val amount = if (item.isNull("price") || !item.has("price")) null else item.optDouble("price").takeIf { !it.isNaN() && it > 0.0 }
                         parsed.add(Offer(item.optString("title", "Конструктор"), item.optString("shop", "Магазин"), link,
                             amount, item.optString("image").takeIf { it.startsWith("https://") }, item.optString("match_type", "set")))
                     }
                     runOnUiThread {
+                        if (serial != requestSerial) return@runOnUiThread
                         sortedOffers = parsed.distinctBy { it.link }
                         statusText.text = (resolvedName?.let { "Набор: $it. " } ?: "") +
-                            (if (parsed.isEmpty()) "Пока нет подтверждённых карточек. Попробуй открыть поиск в магазине." else "Указанные цены могут меняться; доставку в $requestedCity проверь в магазине.") +
+                            (if (parsed.isEmpty()) "Подходящих карточек пока нет." else "Сравнил предложения выбранных магазинов. Цены без данных — внизу; доставка не проверена.") +
                             (if (partial) " Ошибки: ${failures.joinToString("; ")}" else "")
                         refreshOffers()
                     }
                 } finally { connection.disconnect() }
             } catch (e: Exception) { runOnUiThread {
+                if (serial != requestSerial) return@runOnUiThread
                 offersPanel.removeAllViews()
                 statusText.text = if (e is java.net.SocketTimeoutException) "Сервер долго отвечает. Повтори поиск — остальные источники должны отработать независимо." else "Не удалось получить предложения: ${e.localizedMessage ?: "ошибка соединения"}"
             } }
@@ -457,6 +531,7 @@ class MainActivity : Activity() {
         val tinyPack = Regex("""(?:^|[^0-9a-zа-я])(?:[1-9]|1[0-9]|20)\s*(?:pcs?\b|pieces?\b|шт\.?\b|штук\b|детал(?:ь|и|ей)\b)|(?:pcs?\b|pieces?\b)\s*(?:[1-9]|1[0-9]|20)(?!\d)""", RegexOption.IGNORE_CASE).containsMatchIn(title)
         return obviousPart || tinyPack
     }
+    // ONE shared comparison across all selected marketplaces, never one sort per shop.
     private fun refreshOffers() {
         if (!::offersPanel.isInitialized) return
         offersPanel.removeAllViews()
@@ -465,70 +540,82 @@ class MainActivity : Activity() {
             .sortedWith(Comparator<Offer> { a, b ->
                 val kindOrder = (if (isAccessory(a)) 1 else 0).compareTo(if (isAccessory(b)) 1 else 0)
                 if (kindOrder != 0) kindOrder
-                else if (ascending) (a.price ?: Double.POSITIVE_INFINITY).compareTo(b.price ?: Double.POSITIVE_INFINITY)
-                else (b.price ?: Double.NEGATIVE_INFINITY).compareTo(a.price ?: Double.NEGATIVE_INFINITY)
+                else {
+                    // Never rank missing/unverified prices above known RUB prices.
+                    val missing = (a.price == null).compareTo(b.price == null)
+                    if (missing != 0) missing
+                    else if (ascending) (a.price ?: Double.POSITIVE_INFINITY).compareTo(b.price ?: Double.POSITIVE_INFINITY)
+                    else (b.price ?: Double.NEGATIVE_INFINITY).compareTo(a.price ?: Double.NEGATIVE_INFINITY)
+                }
             })
         countText.text = if (favoritesOnly) "Избранное (${filtered.size})" else "Предложения (${filtered.size})"
         if (filtered.isEmpty()) {
-            offersPanel.addView(text(if (favoritesOnly) "Пока нет избранных предложений из текущего поиска." else "Подходящих предложений пока нет.", 14f, muted))
+            offersPanel.addView(text(if (favoritesOnly) "В текущих результатах нет избранного." else "Пока ничего не найдено. Попробуй другой запрос или магазин.", 12f, muted))
             return
         }
-        filtered.forEach { offersPanel.addView(offerCard(it, favs.contains(it.link)), margin(bottom = 10)) }
-    }
-    private fun offerCard(offer: Offer, fav: Boolean): View {
-        val container = row().apply {
-            gravity = Gravity.TOP
-            background = rounded(surface, 18, Color.rgb(54, 66, 87))
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            minimumHeight = dp(143)
+        val lowestSetPrice = filtered.filter { !isAccessory(it) }.mapNotNull { it.price }.minOrNull()
+        filtered.forEach { offer ->
+            val best = !favoritesOnly && lowestSetPrice != null && !isAccessory(offer) && offer.price == lowestSetPrice
+            offersPanel.addView(offerCard(offer, favs.contains(offer.link), best), margin(bottom = 8))
         }
-        val imageFrame = android.widget.FrameLayout(this)
-        val thumbnail = ImageView(this).apply {
-            background = rounded(surface2, 12)
+    }
+
+    private fun offerCard(offer: Offer, fav: Boolean, best: Boolean): View {
+        val card = row().apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = gradient(Color.rgb(25, 43, 66), Color.rgb(10, 23, 42), 17, if (best) Color.rgb(32, 143, 245) else Color.rgb(66, 93, 120))
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+            minimumHeight = dp(111)
+        }
+        val imageFrame = FrameLayout(this)
+        val image = ImageView(this).apply {
+            background = rounded(surface2, 11)
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(android.R.drawable.ic_menu_gallery)
         }
-        imageFrame.addView(thumbnail, android.widget.FrameLayout.LayoutParams(-1, -1))
-        loadOfferImage(offer.image, thumbnail)
-        val like = text(if (fav) "♥" else "♡", 25f, if (fav) yellow else white, true).apply {
-            gravity = Gravity.CENTER
-            background = rounded(Color.rgb(15, 23, 37), 18)
+        imageFrame.addView(image, FrameLayout.LayoutParams(-1, -1))
+        loadOfferImage(offer.image, image)
+        card.addView(imageFrame, LinearLayout.LayoutParams(dp(103), dp(106)))
+        val details = column().apply { setPadding(dp(9), dp(1), dp(4), 0) }
+        val title = text(offer.title, 12.5f, white, true).apply {
+            maxLines = 3
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        details.addView(title)
+        val shopColor = when (offer.shop.lowercase(Locale.ROOT)) {
+            "ozon" -> Color.rgb(15, 91, 239)
+            "wildberries" -> Color.rgb(131, 31, 184)
+            "aliexpress" -> Color.rgb(220, 62, 19)
+            "яндекс маркет" -> Color.rgb(149, 120, 12)
+            else -> Color.rgb(13, 120, 112)
+        }
+        val label = text(offer.shop, 10f, white, true).apply {
+            background = rounded(shopColor, 8)
+            setPadding(dp(5), dp(3), dp(5), dp(3))
+        }
+        details.addView(label, margin(top = 6))
+        details.addView(text(if (isAccessory(offer)) "Деталь / аксессуар" else if (best) "★ Лучшая цена набора" else "Полный набор", 9.5f, if (best) yellow else muted), margin(top = 5))
+        card.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+        val actions = column().apply { gravity = Gravity.RIGHT }
+        val like = text(if (fav) "♥" else "♡", 22f, if (fav) yellow else white).apply {
+            gravity = Gravity.RIGHT
             setOnClickListener { toggleSaved(offer.link) }
             contentDescription = "Добавить в избранное"
         }
-        imageFrame.addView(like, android.widget.FrameLayout.LayoutParams(dp(34), dp(34), Gravity.TOP or Gravity.RIGHT))
-        container.addView(imageFrame, LinearLayout.LayoutParams(dp(112), dp(126)))
-        val details = column().apply { setPadding(dp(11), dp(1), 0, 0) }
-        val shortTitle = text(offer.title, 13.5f, white, true).apply {
-            maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+        actions.addView(like)
+        val amount = text(offer.price?.let { "${money.format(it)} ₽" } ?: "Цена не\nуказана", if (offer.price == null) 10f else 15f, white, true).apply {
+            gravity = Gravity.RIGHT
+            setMaxLines(2)
         }
-        details.addView(shortTitle)
-        val meta = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        val shopColor = when (offer.shop.lowercase(Locale.ROOT)) {
-            "ozon" -> Color.rgb(20, 100, 247)
-            "wildberries" -> Color.rgb(150, 40, 188)
-            "aliexpress" -> Color.rgb(214, 70, 30)
-            "яндекс маркет" -> Color.rgb(225, 184, 15)
-            else -> Color.rgb(20, 140, 125)
-        }
-        val shopText = text(offer.shop, 11f, white, true).apply {
-            background = rounded(shopColor, 8)
-            setPadding(dp(7), dp(4), dp(7), dp(4))
-        }
-        meta.addView(shopText)
-        val kindLabel = text(if (isAccessory(offer)) "  Деталь" else "  Набор", 10f, muted)
-        meta.addView(kindLabel)
-        details.addView(meta, margin(top = 7, bottom = 5))
-        val amount = text(offer.price?.let { "${money.format(it)} ₽" } ?: "Цена неизвестна", if (offer.price != null) 20f else 12f, white, true)
-        details.addView(amount)
-        val open = button("Открыть товар ↗", yellow, bg).apply {
-            textSize = 11f
-            setPadding(dp(6), dp(7), dp(6), dp(7))
+        actions.addView(amount, margin(top = 3))
+        val open = button("Открыть ↗", yellow, bg).apply {
+            textSize = 10f
+            setPadding(dp(7), dp(8), dp(7), dp(8))
             setOnClickListener { openOffer(offer.link) }
         }
-        details.addView(open, margin(top = 7))
-        container.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-        return container
+        actions.addView(open, margin(top = 8))
+        card.addView(actions, LinearLayout.LayoutParams(dp(104), -2))
+        return card
     }
     private fun loadOfferImage(imageUrl: String?, view: ImageView) {
         if (imageUrl == null) return

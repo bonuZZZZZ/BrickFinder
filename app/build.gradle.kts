@@ -11,8 +11,8 @@ android {
         applicationId = "ru.brickfinder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.9.1"
+        versionCode = 4
+        versionName = "0.9.8"
     }
 
     compileOptions {

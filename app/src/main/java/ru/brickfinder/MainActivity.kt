@@ -9,6 +9,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -28,7 +29,7 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlin.concurrent.thread
 
-/** BrickFinder 0.8 dark UI. Product offers are always supplied by the live Cloudflare API. */
+/** BrickFinder 0.9 dark UI with access code. Product offers are always supplied by the live Cloudflare API. */
 class MainActivity : Activity() {
     private val bg = Color.rgb(10, 15, 25)
     private val surface = Color.rgb(24, 32, 48)
@@ -43,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var photoPreview: ImageView
     private lateinit var selectionText: TextView
     private lateinit var countText: TextView
+    private lateinit var cityButton: TextView
     private lateinit var wbToggle: CheckBox
     private lateinit var aliToggle: CheckBox
     private lateinit var avitoToggle: CheckBox
@@ -55,6 +57,7 @@ class MainActivity : Activity() {
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private val prefs by lazy { getPreferences(MODE_PRIVATE) }
     private val provider get() = prefs.getString("provider", DEFAULT_PROVIDER).orEmpty().trimEnd('/')
+    private val deliveryCity get() = prefs.getString("delivery_city", "Москва").orEmpty().ifBlank { "Москва" }
     private val money = NumberFormat.getNumberInstance(Locale("ru", "RU"))
 
     data class Model(val brand: String, val sku: String, val title: String, val pieces: String) {
@@ -143,8 +146,15 @@ class MainActivity : Activity() {
 
         val sourcesHeading = row()
         sourcesHeading.addView(text("Где искать", 19f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
-        sourcesHeading.addView(text("Тверь  •  доставка уточняется", 11f, muted))
-        content.addView(sourcesHeading, margin(top = 14, bottom = 12))
+        content.addView(sourcesHeading, margin(top = 14, bottom = 8))
+        cityButton = text("⌖  Город доставки: $deliveryCity   ▾", 14f, yellow, true).apply {
+            background = rounded(surface2, 14)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setOnClickListener { chooseDeliveryCity() }
+            contentDescription = "Выбрать город доставки"
+        }
+        content.addView(cityButton, margin(bottom = 7))
+        content.addView(text("Доступность доставки и итоговую стоимость уточняй в магазине.", 11f, muted), margin(bottom = 12))
         val selectors = column()
         val firstLine = row()
         wbToggle = sourceToggle("Wildberries", true)
@@ -198,15 +208,71 @@ class MainActivity : Activity() {
     private fun disabledSource(label: String) = text(label, 12f, muted).apply {
         gravity = Gravity.CENTER; background = rounded(Color.rgb(20, 26, 39), 14, Color.rgb(49, 57, 72))
     }
+    private fun chooseDeliveryCity() {
+        val cities = arrayOf("Москва", "Санкт-Петербург", "Тверь", "Казань", "Екатеринбург", "Новосибирск", "Краснодар", "Нижний Новгород", "Другой город…")
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Город доставки")
+            .setSingleChoiceItems(cities, cities.indexOf(deliveryCity)) { dialog, which ->
+                dialog.dismiss()
+                if (which == cities.lastIndex) {
+                    val field = EditText(this).apply {
+                        hint = "Например, Ростов-на-Дону"
+                        setSingleLine(true)
+                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                    }
+                    val wrapper = column().apply { setPadding(dp(22), dp(8), dp(22), 0); addView(field) }
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle("Введите город")
+                        .setView(wrapper)
+                        .setPositiveButton("Сохранить") { _, _ -> setDeliveryCity(field.text.toString()) }
+                        .setNegativeButton("Отмена", null).show()
+                } else setDeliveryCity(cities[which])
+            }
+            .setNegativeButton("Отмена", null).show()
+    }
+
+    private fun setDeliveryCity(raw: String) {
+        val value = raw.trim().replace(Regex("\\s+"), " ")
+        if (value.length !in 2..60 || !value.all { it.isLetter() || it == ' ' || it == '-' || it == 'ё' || it == 'Ё' }) {
+            Toast.makeText(this, "Укажи корректное название города", Toast.LENGTH_LONG).show()
+            return
+        }
+        prefs.edit().putString("delivery_city", value).apply()
+        cityButton.text = "⌖  Город доставки: $value   ▾"
+        statusText.text = "Город выбран: $value. Проверь возможность доставки в карточке магазина."
+    }
+
     private fun showSettings() {
-        val field = EditText(this).apply { setSingleLine(true); setText(provider); hint = "https://...workers.dev" }
-        val wrap = LinearLayout(this).apply { setPadding(dp(24), dp(6), dp(24), dp(4)); addView(field) }
-        android.app.AlertDialog.Builder(this).setTitle("Адрес источника цен")
-            .setMessage("Сюда вводится HTTPS-адрес Cloudflare Worker, не API-ключ.")
-            .setView(wrap).setPositiveButton("Сохранить") { _, _ ->
-                val next = field.text.toString().trim().trimEnd('/')
-                if (next.startsWith("https://")) { prefs.edit().putString("provider", next).apply(); statusText.text = "Источник обновлён." }
-                else statusText.text = "Нужен HTTPS-адрес сервера."
+        val address = EditText(this).apply {
+            setSingleLine(true); setText(provider); hint = "https://...workers.dev"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val access = EditText(this).apply {
+            setSingleLine(true)
+            hint = "Личный код доступа (не API.SH ключ)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(prefs.getString("access_token", "").orEmpty())
+        }
+        val form = column().apply {
+            setPadding(dp(24), dp(8), dp(24), dp(8))
+            addView(text("Адрес сервера", 14f, muted))
+            addView(address)
+            addView(text("Код доступа к BrickFinder", 14f, muted))
+            addView(access)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Защищённый поиск")
+            .setMessage("Код доступа задаётся в Cloudflare как BRICKFINDER_ACCESS_TOKEN. Не вводи сюда API.SH ключ.")
+            .setView(form)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val next = address.text.toString().trim().trimEnd('/')
+                val token = access.text.toString().trim()
+                if (!next.startsWith("https://") || token.isEmpty()) {
+                    statusText.text = "Введи HTTPS-адрес и личный код доступа."
+                } else {
+                    prefs.edit().putString("provider", next).putString("access_token", token).apply()
+                    statusText.text = "Настройки защищённого поиска сохранены."
+                }
             }.setNegativeButton("Отмена", null).show()
     }
     private fun pickPhoto() {
@@ -262,15 +328,27 @@ class MainActivity : Activity() {
         offersPanel.addView(text("Загружаю предложения…", 14f, muted))
         countText.text = "Предложения"
         val requestedProvider = provider
+        val requestedCity = deliveryCity
+        val accessToken = prefs.getString("access_token", "").orEmpty()
+        if (accessToken.isBlank()) { statusText.text = "Открой настройки ⚙ и введи личный код доступа."; return }
         thread {
             try {
-                val endpoint = URL("$requestedProvider/api/search?q=${enc(query)}&city=${enc("Тверь")}&sources=${enc(selected.joinToString(","))}")
+                val endpoint = URL("$requestedProvider/api/search?q=${enc(query)}&city=${enc(requestedCity)}&sources=${enc(selected.joinToString(","))}")
                 val connection = endpoint.openConnection() as HttpURLConnection
-                connection.connectTimeout = 15000; connection.readTimeout = 30000
+                connection.connectTimeout = 12000; connection.readTimeout = 35000
+                connection.setRequestProperty("x-brickfinder-token", accessToken)
                 try {
                     val code = connection.responseCode
+                    if (code == 401) throw IllegalStateException("Неверный код доступа BrickFinder")
+                    if (code == 503) throw IllegalStateException("Сервер ещё не настроен: проверь секреты Cloudflare")
+                    if (code == 502) throw IllegalStateException("Магазины не ответили вовремя. Повтори поиск позже")
                     if (code !in 200..299) throw IllegalStateException("HTTP $code")
                     val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val resolvedName = root.optString("catalog_name").takeIf { it.isNotBlank() && it != "null" }
+                    val providerErrors = root.optJSONArray("sources")
+                    val partial = (0 until (providerErrors?.length() ?: 0)).any { i ->
+                        !providerErrors!!.optJSONObject(i)?.optString("error").isNullOrBlank()
+                    }
                     val arr = root.optJSONArray("items")
                     val parsed = mutableListOf<Offer>()
                     if (arr != null) for (i in 0 until arr.length()) {
@@ -283,13 +361,15 @@ class MainActivity : Activity() {
                     }
                     runOnUiThread {
                         sortedOffers = parsed.distinctBy { it.link }
-                        statusText.text = if (parsed.isEmpty()) "Подтверждённых совпадений нет. Попробуй другой артикул." else "Найденные цены ориентировочные. Наличие и доставку в Тверь проверь в магазине."
+                        statusText.text = (resolvedName?.let { "Набор: $it. " } ?: "") +
+                            (if (parsed.isEmpty()) "Подходящих предложений нет. Попробуй другой запрос." else "Цены ориентировочные; доставку в $requestedCity проверь в магазине.") +
+                            (if (partial) " Некоторые площадки не ответили вовремя." else "")
                         refreshOffers()
                     }
                 } finally { connection.disconnect() }
             } catch (e: Exception) { runOnUiThread {
                 offersPanel.removeAllViews()
-                statusText.text = "Не удалось получить предложения: ${e.localizedMessage ?: "ошибка соединения"}"
+                statusText.text = if (e is java.net.SocketTimeoutException) "Сервер долго отвечает. Повтори поиск — остальные источники должны отработать независимо." else "Не удалось получить предложения: ${e.localizedMessage ?: "ошибка соединения"}"
             } }
         }
     }

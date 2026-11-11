@@ -129,7 +129,7 @@ class MainActivity : Activity() {
         val scroller = ScrollView(this).apply {
             isFillViewport = false
             clipToPadding = false
-            fillViewport = false
+            isFillViewport = false
             overScrollMode = View.OVER_SCROLL_NEVER
         }
         backdrop.addView(scroller, FrameLayout.LayoutParams(-1, -1))

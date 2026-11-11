@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application") version "8.7.3"
     id("org.jetbrains.kotlin.android") version "2.0.21"
@@ -12,8 +11,8 @@ android {
         applicationId = "ru.brickfinder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.8"
+        versionCode = 2
+        versionName = "0.9.1"
     }
 
     compileOptions {
@@ -31,4 +30,3 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.9.3")
 }
-

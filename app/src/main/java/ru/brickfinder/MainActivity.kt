@@ -15,6 +15,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.inputmethod.EditorInfo
 import android.text.InputType
 import android.text.Editable
 import android.text.TextWatcher
@@ -62,6 +65,17 @@ class MainActivity : Activity() {
     private var ascending = true
     private var favoritesOnly = false
     private var requestSerial = 0
+    private val autoHandler = Handler(Looper.getMainLooper())
+    private var pendingAutoSearch: Runnable? = null
+    private fun queueAutoSearch() {
+        pendingAutoSearch?.let { autoHandler.removeCallbacks(it) }
+        val raw = queryInput.text.toString().trim()
+        // Wait for a full article (usually 5 digits), or a meaningful name.
+        if (!Regex("^(?:[A-Za-z]{0,5}\\d{5,7})$").matches(raw) && raw.length < 7) return
+        val action = Runnable { if (queryInput.text.toString().trim() == raw) search() }
+        pendingAutoSearch = action
+        autoHandler.postDelayed(action, 1700L)
+    }
     private var sourceCount = 0
     private var sortButton: TextView? = null
     private var searchTabView: TextView? = null
@@ -129,7 +143,6 @@ class MainActivity : Activity() {
         val scroller = ScrollView(this).apply {
             isFillViewport = false
             clipToPadding = false
-            isFillViewport = false
             overScrollMode = View.OVER_SCROLL_NEVER
         }
         backdrop.addView(scroller, FrameLayout.LayoutParams(-1, -1))
@@ -167,9 +180,17 @@ class MainActivity : Activity() {
             hint = "Название набора или артикул"
             setHintTextColor(muted); setTextColor(white); textSize = 13f
             isSingleLine = true; background = null
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                    pendingAutoSearch?.let { autoHandler.removeCallbacks(it) }
+                    search()
+                    true
+                } else false
+            }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { if (!updatingFromPhoto) photoModel = null }
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { if (!updatingFromPhoto) { photoModel = null; queueAutoSearch() } }
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
@@ -421,6 +442,8 @@ class MainActivity : Activity() {
         return Model(brand, sku, title, pieces)
     }
     private fun search() {
+        pendingAutoSearch?.let { autoHandler.removeCallbacks(it) }
+        pendingAutoSearch = null
         val query = photoModel?.query()?.takeIf { it.isNotBlank() } ?: queryInput.text.toString().trim()
         if (query.length < 2) { statusText.text = "Введи артикул или выбери фотографию."; return }
         val selected = listOfNotNull(if (wbToggle.isChecked) "wildberries" else null,
@@ -618,24 +641,36 @@ class MainActivity : Activity() {
         return card
     }
     private fun loadOfferImage(imageUrl: String?, view: ImageView) {
-        if (imageUrl == null) return
+        if (imageUrl.isNullOrBlank()) return
+        val src = when {
+            imageUrl.startsWith("//") -> "https:$imageUrl"
+            imageUrl.startsWith("http://") -> "https://${imageUrl.removePrefix("http://")}" 
+            else -> imageUrl
+        }
+        if (!src.startsWith("https://")) return
+        view.tag = src
         thread {
             try {
-                val connection = URL(imageUrl).openConnection() as HttpURLConnection
-                connection.connectTimeout = 7000; connection.readTimeout = 9000
+                val connection = URL(src).openConnection() as HttpURLConnection
+                connection.connectTimeout = 6000
+                connection.readTimeout = 9000
                 connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36")
+                connection.setRequestProperty("Accept", "image/jpeg,image/png,image/webp,image/*;q=0.8")
                 try {
                     if (connection.responseCode !in 200..299) return@thread
                     val bitmap: Bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) } ?: return@thread
-                    runOnUiThread { if (view.parent != null) view.setImageBitmap(bitmap) }
+                    runOnUiThread {
+                        if (view.parent != null && view.tag == src) view.setImageBitmap(bitmap)
+                    }
                 } finally { connection.disconnect() }
-            } catch (_: Exception) { /* Image is optional, never disrupt product offers */ }
+            } catch (_: Exception) { /* Leave image placeholder; results are still usable. */ }
         }
     }
     private fun openOffer(url: String) {
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         catch (_: Exception) { statusText.text = "Не удалось открыть карточку товара." }
     }
-    override fun onDestroy() { recognizer.close(); super.onDestroy() }
+    override fun onDestroy() { pendingAutoSearch?.let { autoHandler.removeCallbacks(it) }; recognizer.close(); super.onDestroy() }
     companion object { private const val DEFAULT_PROVIDER = "https://brickfinder-api.lehalepeha8658.workers.dev" }
 }

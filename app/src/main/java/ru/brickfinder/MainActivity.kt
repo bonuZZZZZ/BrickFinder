@@ -48,6 +48,8 @@ class MainActivity : Activity() {
     private lateinit var wbToggle: CheckBox
     private lateinit var aliToggle: CheckBox
     private lateinit var avitoToggle: CheckBox
+    private lateinit var ozonToggle: CheckBox
+    private lateinit var yandexToggle: CheckBox
     private var photoModel: Model? = null
     private var updatingFromPhoto = false
     private var sortedOffers: List<Offer> = emptyList()
@@ -146,6 +148,11 @@ class MainActivity : Activity() {
 
         val sourcesHeading = row()
         sourcesHeading.addView(text("Где искать", 19f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val how = text("ⓘ  Как сравниваем?", 11f, Color.rgb(80, 167, 255)).apply {
+            setOnClickListener { showComparisonInfo() }
+            setPadding(dp(6), dp(9), 0, dp(9))
+        }
+        sourcesHeading.addView(how)
         content.addView(sourcesHeading, margin(top = 14, bottom = 8))
         cityButton = text("⌖  Город доставки: $deliveryCity   ▾", 14f, yellow, true).apply {
             background = rounded(surface2, 14)
@@ -153,38 +160,48 @@ class MainActivity : Activity() {
             setOnClickListener { chooseDeliveryCity() }
             contentDescription = "Выбрать город доставки"
         }
-        content.addView(cityButton, margin(bottom = 7))
-        content.addView(text("Доступность доставки и итоговую стоимость уточняй в магазине.", 11f, muted), margin(bottom = 12))
+        content.addView(cityButton, margin(bottom = 8))
         val selectors = column()
         val firstLine = row()
+        ozonToggle = sourceToggle("Ozon", true)
         wbToggle = sourceToggle("Wildberries", true)
-        aliToggle = sourceToggle("AliExpress", true)
-        firstLine.addView(wbToggle, LinearLayout.LayoutParams(0, dp(53), 1f))
-        firstLine.addView(aliToggle, LinearLayout.LayoutParams(0, dp(53), 1f).apply { leftMargin = dp(8) })
+        firstLine.addView(ozonToggle, LinearLayout.LayoutParams(0, dp(54), 1f))
+        firstLine.addView(wbToggle, LinearLayout.LayoutParams(0, dp(54), 1f).apply { leftMargin = dp(8) })
         selectors.addView(firstLine)
-        val unavailable = row()
-        unavailable.addView(disabledSource("Ozon · скоро"), LinearLayout.LayoutParams(0, dp(48), 1f))
-        unavailable.addView(disabledSource("Яндекс Маркет · скоро"), LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
-        selectors.addView(unavailable, margin(top = 8))
+        val secondLine = row()
+        aliToggle = sourceToggle("AliExpress", true)
+        yandexToggle = sourceToggle("Яндекс Маркет", true)
+        secondLine.addView(aliToggle, LinearLayout.LayoutParams(0, dp(54), 1f))
+        secondLine.addView(yandexToggle, LinearLayout.LayoutParams(0, dp(54), 1f).apply { leftMargin = dp(8) })
+        selectors.addView(secondLine, margin(top = 8))
         avitoToggle = sourceToggle("Авито · дополнительно", false)
         selectors.addView(avitoToggle, margin(top = 8))
         content.addView(selectors)
+        content.addView(text("Ozon: цены по карте Ozon при подключённом API; иначе поиск страниц. Яндекс Маркет: поиск страниц. Доставку в $deliveryCity проверяй в магазине.", 11f, muted), margin(top = 9))
 
         val go = button("Найти предложения", blue, white)
         go.setOnClickListener { search() }
         content.addView(go, margin(top = 15, bottom = 8))
+        val externalHeading = text("Поиск напрямую в магазинах", 13f, muted, true)
+        content.addView(externalHeading, margin(top = 8, bottom = 6))
+        val externalLinks = row()
+        val ozonLink = button("Ozon ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("ozon") } }
+        val marketLink = button("Яндекс Маркет ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("market") } }
+        externalLinks.addView(ozonLink, LinearLayout.LayoutParams(0, dp(45), 1f))
+        externalLinks.addView(marketLink, LinearLayout.LayoutParams(0, dp(45), 1f).apply { leftMargin = dp(8) })
+        content.addView(externalLinks, margin(bottom = 8))
         statusText = text("Поиск использует твой Cloudflare Worker.", 12f, muted)
         content.addView(statusText, margin(bottom = 14))
 
         val resultsHeading = row()
-        countText = text("Предложения", 21f, white, true)
+        countText = text("Найденные предложения", 19f, white, true)
         resultsHeading.addView(countText, LinearLayout.LayoutParams(0, -2, 1f))
-        val sort = text("⇅  По цене", 13f, yellow, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); background = rounded(surface2, 14); setOnClickListener { ascending = !ascending; refreshOffers() } }
+        val sort = text("⇅  Сначала выгодные", 13f, yellow, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); background = rounded(surface2, 14); setOnClickListener { ascending = !ascending; refreshOffers() } }
         resultsHeading.addView(sort)
         content.addView(resultsHeading, margin(bottom = 12))
         offersPanel = column()
         content.addView(offersPanel)
-        offersPanel.addView(text("Здесь появятся проверенные карточки наборов с ценами и ссылками на магазины.", 13f, muted))
+        offersPanel.addView(text("Здесь появятся предложения из выбранных источников. Наличие и цены проверяй в магазине.", 13f, muted))
 
         val bottom = row().apply {
             setPadding(dp(20), dp(10), dp(20), dp(12))
@@ -200,10 +217,28 @@ class MainActivity : Activity() {
     }
 
     private fun sourceToggle(label: String, checked: Boolean): CheckBox = CheckBox(this).apply {
-        text = label; textSize = 13f; setTextColor(white); isChecked = checked
+        val mark = when {
+            label.startsWith("Ozon") -> "◉  "
+            label.startsWith("Wildberries") -> "WB  "
+            label.startsWith("AliExpress") -> "▣  "
+            label.startsWith("Яндекс") -> "Я  "
+            else -> "●  "
+        }
+        text = mark + label
+        textSize = if (label == "Яндекс Маркет") 11.5f else 12f
+        setTextColor(white); isChecked = checked
         buttonTintList = android.content.res.ColorStateList.valueOf(yellow)
-        background = rounded(surface2, 14)
-        setPadding(dp(10), 0, dp(8), 0)
+        background = rounded(surface2, 14, if (checked) Color.rgb(51, 84, 136) else Color.rgb(52, 60, 80))
+        setPadding(dp(6), 0, dp(6), 0)
+        setOnCheckedChangeListener { buttonView, active ->
+            buttonView.background = rounded(surface2, 14, if (active) blue else Color.rgb(52, 60, 80))
+        }
+    }
+    private fun showComparisonInfo() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Как BrickFinder сравнивает предложения")
+            .setMessage("Полные наборы выводятся выше отдельных деталей. Внутри групп товары сортируются по цене.\n\nOzon показывает цену по карте Ozon, если в Cloudflare подключён TOOLZERHUB_API_KEY. Без него Ozon, как и Яндекс Маркет, ищет страницы товаров без подтверждённой цены. Цены и наличие проверяй в магазине.\n\nРейтинги, скидки и стоимость доставки не показываются без подтверждённых данных. Итоговую цену проверяй в магазине.")
+            .setPositiveButton("Понятно", null).show()
     }
     private fun disabledSource(label: String) = text(label, 12f, muted).apply {
         gravity = Gravity.CENTER; background = rounded(Color.rgb(20, 26, 39), 14, Color.rgb(49, 57, 72))
@@ -319,7 +354,8 @@ class MainActivity : Activity() {
         val query = photoModel?.query()?.takeIf { it.isNotBlank() } ?: queryInput.text.toString().trim()
         if (query.length < 2) { statusText.text = "Введи артикул или выбери фотографию."; return }
         val selected = listOfNotNull(if (wbToggle.isChecked) "wildberries" else null,
-            if (aliToggle.isChecked) "aliexpress" else null, if (avitoToggle.isChecked) "avito" else null)
+            if (aliToggle.isChecked) "aliexpress" else null, if (avitoToggle.isChecked) "avito" else null,
+            if (ozonToggle.isChecked) "ozon" else null, if (yandexToggle.isChecked) "yandexmarket" else null)
         if (selected.isEmpty()) { statusText.text = "Выбери хотя бы одну подключённую площадку."; return }
         if (!provider.startsWith("https://")) { statusText.text = "Укажи HTTPS-адрес сервера в настройках ⚙."; return }
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(queryInput.windowToken, 0)
@@ -341,14 +377,24 @@ class MainActivity : Activity() {
                     val code = connection.responseCode
                     if (code == 401) throw IllegalStateException("Неверный код доступа BrickFinder")
                     if (code == 503) throw IllegalStateException("Сервер ещё не настроен: проверь секреты Cloudflare")
-                    if (code == 502) throw IllegalStateException("Выбранные площадки не ответили. Попробуй включить Wildberries или повторить запрос позже")
+                    if (code == 502) {
+                        val diagnostic = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                        val errors = runCatching { JSONObject(diagnostic).optJSONArray("sources") }.getOrNull()
+                        val summary = (0 until (errors?.length() ?: 0)).mapNotNull { i ->
+                            errors?.optJSONObject(i)?.let { o -> o.optString("error").takeIf { it.isNotBlank() }?.let { "${o.optString("source")}: $it" } }
+                        }.joinToString("; ")
+                        throw IllegalStateException(if (summary.isNotBlank()) summary else "Выбранные площадки не ответили")
+                    }
                     if (code !in 200..299) throw IllegalStateException("HTTP $code")
                     val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                     val resolvedName = root.optString("catalog_name").takeIf { it.isNotBlank() && it != "null" }
                     val providerErrors = root.optJSONArray("sources")
-                    val partial = (0 until (providerErrors?.length() ?: 0)).any { i ->
-                        !providerErrors!!.optJSONObject(i)?.optString("error").isNullOrBlank()
+                    val failures = (0 until (providerErrors?.length() ?: 0)).mapNotNull { i ->
+                        providerErrors?.optJSONObject(i)?.let { o ->
+                            o.optString("error").takeIf { it.isNotBlank() }?.let { "${o.optString("source")}: $it" }
+                        }
                     }
+                    val partial = failures.isNotEmpty()
                     val arr = root.optJSONArray("items")
                     val parsed = mutableListOf<Offer>()
                     if (arr != null) for (i in 0 until arr.length()) {
@@ -363,7 +409,7 @@ class MainActivity : Activity() {
                         sortedOffers = parsed.distinctBy { it.link }
                         statusText.text = (resolvedName?.let { "Набор: $it. " } ?: "") +
                             (if (parsed.isEmpty()) "Подходящих предложений нет. Попробуй другой запрос." else "Цены ориентировочные; доставку в $requestedCity проверь в магазине.") +
-                            (if (partial) " Некоторые площадки не ответили вовремя." else "")
+                            (if (partial) " Ошибки: ${failures.joinToString("; ")}" else "")
                         refreshOffers()
                     }
                 } finally { connection.disconnect() }
@@ -374,6 +420,12 @@ class MainActivity : Activity() {
         }
     }
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    private fun openMarketplaceSearch(market: String) {
+        val q = queryInput.text.toString().trim().ifBlank { photoModel?.query().orEmpty() }
+        if (q.isBlank()) { statusText.text = "Сначала введи артикул или название набора."; return }
+        val site = if (market == "ozon") "https://www.ozon.ru/search/?text=${enc("LEGO $q")}" else "https://market.yandex.ru/search?text=${enc("LEGO $q")}" 
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(site)))
+    }
     private fun validCard(value: String): Boolean = try {
         val uri = Uri.parse(value); if (uri.scheme != "https") throw IllegalArgumentException("Only HTTPS")
         val host = uri.host.orEmpty().lowercase(Locale.ROOT)
@@ -394,13 +446,22 @@ class MainActivity : Activity() {
         prefs.edit().putStringSet("favorites", set).apply()
         refreshOffers()
     }
+    // Client-side fallback: classify obvious small replacement packs even if the
+    // backend response contains an older "set" label (e.g. a cached response).
+    private fun isAccessory(offer: Offer): Boolean {
+        if (offer.kind == "accessory") return true
+        val title = offer.title.lowercase()
+        val obviousPart = Regex("""запчаст|детал[ьи]|аксессуар|колес[оа]|шин[аы]|панел[ьи]|спойлер|подсветк|подставк|наклейк|spare parts|replacement|light kit|display stand|wheel|sticker""").containsMatchIn(title)
+        val tinyPack = Regex("""(?:^|[^0-9a-zа-я])(?:[1-9]|1[0-9]|20)\s*(?:pcs?\b|pieces?\b|шт\.?\b|штук\b|детал(?:ь|и|ей)\b)|(?:pcs?\b|pieces?\b)\s*(?:[1-9]|1[0-9]|20)(?!\d)""", RegexOption.IGNORE_CASE).containsMatchIn(title)
+        return obviousPart || tinyPack
+    }
     private fun refreshOffers() {
         if (!::offersPanel.isInitialized) return
         offersPanel.removeAllViews()
         val favs = saved()
         val filtered = sortedOffers.filter { !favoritesOnly || favs.contains(it.link) }
             .sortedWith(Comparator<Offer> { a, b ->
-                val kindOrder = (if (a.kind == "accessory") 1 else 0).compareTo(if (b.kind == "accessory") 1 else 0)
+                val kindOrder = (if (isAccessory(a)) 1 else 0).compareTo(if (isAccessory(b)) 1 else 0)
                 if (kindOrder != 0) kindOrder
                 else if (ascending) (a.price ?: Double.POSITIVE_INFINITY).compareTo(b.price ?: Double.POSITIVE_INFINITY)
                 else (b.price ?: Double.NEGATIVE_INFINITY).compareTo(a.price ?: Double.NEGATIVE_INFINITY)
@@ -413,7 +474,10 @@ class MainActivity : Activity() {
         filtered.forEach { offersPanel.addView(offerCard(it, favs.contains(it.link)), margin(bottom = 10)) }
     }
     private fun offerCard(offer: Offer, fav: Boolean): View {
-        val container = column().apply { background = rounded(surface, 17, Color.rgb(47, 58, 76)); setPadding(dp(12), dp(12), dp(12), dp(12)) }
+        val container = column().apply {
+            background = rounded(surface, 17, Color.rgb(47, 58, 76))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
         val line = row().apply { gravity = Gravity.TOP }
         val image = ImageView(this).apply {
             background = rounded(surface2, 10)
@@ -422,21 +486,34 @@ class MainActivity : Activity() {
         }
         line.addView(image, LinearLayout.LayoutParams(dp(112), dp(112)))
         loadOfferImage(offer.image, image)
-        val info = column().apply { setPadding(dp(12), dp(2), 0, 0) }
-        val heading = text(offer.title, 14f, white, true).apply { maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END }
-        info.addView(heading)
-        info.addView(text(offer.shop + if (offer.kind == "accessory") " · Деталь / аксессуар" else " · Набор", 12f, yellow, true), margin(top = 7))
-        info.addView(text(offer.price?.let { "${money.format(it)} ₽" } ?: "Цена неизвестна", 21f, white, true), margin(top = 8))
+        val info = column().apply { setPadding(dp(10), dp(1), 0, 0) }
+        info.addView(text(offer.title, 13f, white, true).apply {
+            maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        val color = when (offer.shop.lowercase(Locale.ROOT)) {
+            "ozon" -> Color.rgb(79, 153, 255)
+            "wildberries" -> Color.rgb(235, 116, 255)
+            "aliexpress" -> Color.rgb(255, 134, 70)
+            "яндекс маркет" -> yellow
+            else -> Color.rgb(101, 221, 185)
+        }
+        info.addView(text(offer.shop + if (isAccessory(offer)) " · Деталь" else " · Набор", 11f, color, true), margin(top = 6))
+        info.addView(text(offer.price?.let { "${money.format(it)} ₽" } ?: "Цена не подтверждена", if (offer.price != null) 19f else 12f, white, true), margin(top = 8))
         line.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         container.addView(line)
         val actions = row()
-        val open = button("Открыть товар ↗", yellow, bg).apply { textSize = 14f; setOnClickListener { openOffer(offer.link) } }
-        actions.addView(open, LinearLayout.LayoutParams(0, dp(47), 1f))
-        val heart = text(if (fav) "♥" else "♡", 28f, if (fav) yellow else white).apply {
-            gravity = Gravity.CENTER; setOnClickListener { toggleSaved(offer.link) }; contentDescription = "Добавить в избранное"
+        val open = button("Открыть товар ↗", yellow, bg).apply {
+            textSize = 13f
+            setOnClickListener { openOffer(offer.link) }
         }
-        actions.addView(heart, LinearLayout.LayoutParams(dp(54), dp(47)))
-        container.addView(actions, margin(top = 12))
+        actions.addView(open, LinearLayout.LayoutParams(0, dp(42), 1f))
+        val heart = text(if (fav) "♥" else "♡", 27f, if (fav) yellow else white).apply {
+            gravity = Gravity.CENTER
+            setOnClickListener { toggleSaved(offer.link) }
+            contentDescription = "Добавить в избранное"
+        }
+        actions.addView(heart, LinearLayout.LayoutParams(dp(46), dp(42)))
+        container.addView(actions, margin(top = 9))
         return container
     }
     private fun loadOfferImage(imageUrl: String?, view: ImageView) {

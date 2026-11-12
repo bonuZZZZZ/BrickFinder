@@ -305,22 +305,32 @@ class MainActivity : Activity() {
     }
 
     private fun sourceToggle(label: String, initial: String, color: Int, checkedByDefault: Boolean): CheckBox = CheckBox(this).apply {
+        // Bitmap badges do not rely on missing Unicode glyphs or emoji fonts.
         setButtonDrawable(null as Drawable?)
-        text = "${if (checkedByDefault) "☑" else "□"} $initial $label"
+        val iconId = when (label) {
+            "Ozon" -> R.drawable.bf_ozon
+            "Wildberries" -> R.drawable.bf_wildberries
+            "AliExpress" -> R.drawable.bf_aliexpress
+            "Яндекс Маркет" -> R.drawable.bf_yandexmarket
+            else -> R.drawable.bf_avito
+        }
+        val logo = resources.getDrawable(iconId, theme).mutate()
+        logo.setBounds(0, 0, dp(21), dp(21))
+        setCompoundDrawables(logo, null, null, null)
+        compoundDrawablePadding = dp(5)
         textSize = when (label) {
-            "Wildberries", "Яндекс Маркет", "AliExpress" -> 10.5f
+            "Wildberries", "Яндекс Маркет", "AliExpress" -> 10f
             else -> 12f
         }
         setTextColor(white)
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER_VERTICAL
         isChecked = prefs.getBoolean("source_$label", checkedByDefault)
-        text = "${if (isChecked) "☑" else "□"} $initial $label"
-        buttonTintList = android.content.res.ColorStateList.valueOf(yellow)
+        text = "$label ${if (isChecked) "✓" else "□"}"
         background = gradient(if (isChecked) Color.rgb(17, 58, 119) else surface2, Color.rgb(9, 25, 48), 14, if (isChecked) Color.rgb(24, 140, 255) else Color.rgb(65, 87, 121))
-        setPadding(dp(3), 0, dp(2), 0)
+        setPadding(dp(5), 0, dp(2), 0)
         setOnCheckedChangeListener { tile, active ->
-            tile.text = "${if (active) "☑" else "□"} $initial $label"
+            tile.text = "$label ${if (active) "✓" else "□"}"
             tile.background = gradient(if (active) Color.rgb(17, 58, 119) else surface2, Color.rgb(9, 25, 48), 14, if (active) Color.rgb(24, 140, 255) else Color.rgb(65, 87, 121))
             prefs.edit().putBoolean("source_$label", active).apply()
         }
@@ -492,6 +502,14 @@ class MainActivity : Activity() {
                         }
                     }
                     val partial = failures.isNotEmpty()
+                    val providerDiagnostics = (0 until (providerErrors?.length() ?: 0)).mapNotNull { i ->
+                        providerErrors?.optJSONObject(i)?.let { o ->
+                            val source = o.optString("source")
+                            val rawCount = o.optInt("returned", -1)
+                            val excluded = o.optInt("filtered", -1)
+                            if (source.isBlank() || rawCount < 0) null else "$source: $rawCount найдено, ${rawCount - excluded.coerceAtLeast(0)} подходит"
+                        }
+                    }.joinToString("; ")
                     val arr = root.optJSONArray("items")
                     val parsed = mutableListOf<Offer>()
                     if (arr != null) for (i in 0 until arr.length()) {
@@ -507,7 +525,8 @@ class MainActivity : Activity() {
                         sortedOffers = parsed.distinctBy { it.link }
                         statusText.text = (resolvedName?.let { "Набор: $it. " } ?: "") +
                             (if (parsed.isEmpty()) "Подходящих карточек пока нет." else "Сравнил предложения выбранных магазинов. Цены без данных — внизу; доставка не проверена.") +
-                            (if (partial) " Ошибки: ${failures.joinToString("; ")}" else "")
+                            (if (partial) " Ошибки: ${failures.joinToString("; ")}" else "") +
+                            (if (parsed.isEmpty() && providerDiagnostics.isNotBlank()) " Проверка источников: $providerDiagnostics" else "")
                         refreshOffers()
                     }
                 } finally { connection.disconnect() }
@@ -534,7 +553,7 @@ class MainActivity : Activity() {
             host == "www.avito.ru" || host == "avito.ru" -> path.matches(Regex(".*/[^/]+_\\d{5,}/?"))
             host == "www.aliexpress.com" || host == "aliexpress.com" || host == "aliexpress.ru" || host == "www.aliexpress.ru" -> path.matches(Regex("/item/\\d+\\.html/?"))
             host == "www.ozon.ru" || host == "ozon.ru" -> path.contains("/product/")
-            host == "market.yandex.ru" -> path.contains("/product/") || path.contains("/product--")
+            (host == "market.yandex.ru" || host == "www.market.yandex.ru") -> path.contains("/product/") || path.contains("/product--") || path.contains("/card/") || path.contains("/sku/")
             else -> false
         }
     } catch (_: Exception) { false }
@@ -573,7 +592,15 @@ class MainActivity : Activity() {
             })
         countText.text = if (favoritesOnly) "Избранное (${filtered.size})" else "Предложения (${filtered.size})"
         if (filtered.isEmpty()) {
-            offersPanel.addView(text(if (favoritesOnly) "В текущих результатах нет избранного." else "Пока ничего не найдено. Попробуй другой запрос или магазин.", 12f, muted))
+            offersPanel.addView(text(if (favoritesOnly) "В текущих результатах нет избранного." else "Подтверждённых карточек пока нет. Можно проверить товары напрямую на площадках:", 12f, muted))
+            if (!favoritesOnly) {
+                val links = row()
+                val oz = button("Ozon ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("ozon") } }
+                val ya = button("Яндекс Маркет ↗", surface2, yellow).apply { textSize = 12f; setOnClickListener { openMarketplaceSearch("market") } }
+                links.addView(oz, LinearLayout.LayoutParams(0, dp(42), 1f))
+                links.addView(ya, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(8) })
+                offersPanel.addView(links, margin(top = 9))
+            }
             return
         }
         val lowestSetPrice = filtered.filter { !isAccessory(it) }.mapNotNull { it.price }.minOrNull()
@@ -613,6 +640,18 @@ class MainActivity : Activity() {
             else -> Color.rgb(13, 120, 112)
         }
         val label = text(offer.shop, 10f, white, true).apply {
+            val iconRes = when (offer.shop.lowercase(Locale.ROOT)) {
+                "ozon" -> R.drawable.bf_ozon
+                "wildberries" -> R.drawable.bf_wildberries
+                "aliexpress" -> R.drawable.bf_aliexpress
+                "яндекс маркет" -> R.drawable.bf_yandexmarket
+                else -> R.drawable.bf_avito
+            }
+            val icon = resources.getDrawable(iconRes, theme).mutate()
+            icon.setBounds(0, 0, dp(15), dp(15))
+            setCompoundDrawables(icon, null, null, null)
+            compoundDrawablePadding = dp(3)
+            gravity = Gravity.CENTER_VERTICAL
             background = rounded(shopColor, 8)
             setPadding(dp(5), dp(3), dp(5), dp(3))
         }
